@@ -1,0 +1,53 @@
+%% ---------------------------------------------------------------------------
+%% preamble-extra.tex — YOUR preamble additions.
+%%
+%% This file is never overwritten by the import script. Put here anything your
+%% papers need that `amse_these.cls` does not already load.
+%%
+%% What is below is the set of packages and macros that working-paper preambles
+%% in economics need most often. It is loaded by default because a missing one
+%% usually fails *silently*: LaTeX prints "Undefined control sequence", keeps
+%% going, and the symbol simply never appears in the PDF. Comment out whatever
+%% you do not need.
+%%
+%% After running tools/import_chapter.py, read its report: it lists every
+%% package your paper's own preamble loaded that is not available here.
+%% ---------------------------------------------------------------------------
+
+%%% --- Significance stars from esttab / estout ------------------------------
+%% Tables exported by Stata's esttab use \sym{**}. Without it the stars vanish.
+\providecommand{\sym}[1]{\ensuremath{^{#1}}}
+
+%%% --- Numbers and units -----------------------------------------------------
+\RequirePackage{siunitx}                    %% \num{12345} -> 12 345
+\providecommand{\euro}{\texteuro}
+
+%%% --- Maths shorthands commonly used in papers ------------------------------
+\RequirePackage{bbm}                        %% \mathbbm{1} (indicator function)
+\providecommand{\E}{\ensuremath{\mathbb{E}}}
+\providecommand{\dln}[1]{\ensuremath{\mathrm{d}\ln #1}}
+
+%%% --- Draft annotations ------------------------------------------------------
+\RequirePackage[normalem]{ulem}             %% \sout{...}, \uwave{...} (latexdiff)
+\RequirePackage{comment}                    %% \begin{comment} ... \end{comment}
+\providecommand{\red}[1]{{\color{red}#1}}
+\providecommand{\blue}[1]{{\color{blue}#1}}
+
+%%% --- Figures drawn in TikZ / pgfplots ---------------------------------------
+%% Comment this block out if none of your chapters draws figures in code:
+%% it is the slowest part of this file to load.
+\usetikzlibrary{trees, positioning, shapes.geometric, arrows.meta,
+    decorations.pathreplacing, calc, backgrounds, fit}
+\RequirePackage{pgfplots}
+\pgfplotsset{compat=1.18}
+
+%%% --- Theorem-like environments the class does not define --------------------
+%% amse_these.cls already defines: theorem, assumption, corollary, proposition,
+%% lemma, conjecture, algorithm, example, remark, proof.
+%% Do NOT load amsthm here: it redefines `proof` and clashes with the class.
+\newenvironment{prediction}%
+    {\par\medskip\noindent\textbf{Prediction.}\itshape}%
+    {\par\medskip}
+
+%%% --- Colours ----------------------------------------------------------------
+\definecolor{navyblue}{rgb}{0.0,0.0,0.5}

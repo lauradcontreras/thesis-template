@@ -1,0 +1,28 @@
+## LaTeX build artefacts
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.idx
+*.ilg
+*.ind
+*.lof
+*.log
+*.lot
+*.out
+*.run.xml
+*.synctex.gz
+*.toc
+these.pdf
+
+## the import script's bookkeeping and backups
+**/.thesis-import.json
+**/_orig-overleaf/
+*.bib.orig
+
+## macOS / Python
+.DS_Store
+__pycache__/
+.Rhistory

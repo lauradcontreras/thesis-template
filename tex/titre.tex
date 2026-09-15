@@ -1,0 +1,113 @@
+\newgeometry{margin=2em}
+
+\begin{center}
+	\begin{minipage}[c]{.5\linewidth}
+		\raggedright\includegraphics[height=5em]{logo/logo_amu.pdf}
+	\end{minipage}\hfill
+	\begin{minipage}[c]{.5\linewidth}
+		%% second logo, if your thesis is a cotutelle:
+		%\raggedleft\includegraphics[height=5em]{logo/partner.pdf}
+	\end{minipage}\hfill
+\end{center}
+
+\vspace{1em}
+
+\begin{center}
+	\begin{minipage}[c]{.63\linewidth}
+		\dhorline{\textwidth}{4pt}
+	\end{minipage}\hfill
+	\begin{minipage}[c]{.35\linewidth}
+		\raggedleft\titl{NNT/NL : XXXXAIXMXXXX/XXXEDXXX}
+		%% TODO — your numero national de these (NNT) and numero local (NL),
+		%% both from https://depot-theses.univ-amu.fr/
+	\end{minipage}\hfill
+\end{center}
+
+\doublespacing
+\begin{flushleft}
+    \titb{\HUGE\textcolor{blueamu}{THÈSE DE DOCTORAT}}\\
+	\titl{\Large Soutenue à Aix-Marseille Université}\\
+	%\titl{\Large dans le cadre d'une cotutelle avec }\\
+	\titl{\Large le JJ MOIS AAAA par}\\ %% TODO — defence date
+\end{flushleft}
+\vspace{2em}
+\begin{center}
+	\titsb{\Huge Prénom NOM}\\ %% TODO
+    \vspace{1em}
+	\titm{\LARGE Title of the thesis}\\ %% TODO
+\end{center}
+\singlespacing
+
+\vspace{1.5em}
+
+\begin{center}
+	\begin{minipage}[t]{.45\linewidth}
+    	    \vspace{.5em}
+        	\titb{Discipline}
+
+        	\titl{Sciences Economiques}
+
+    	    \vspace{1em}
+        	\titb{École doctorale}
+
+        	\titl{Sciences Economiques et Gestion (372)}
+
+    	    \vspace{1em}
+        	\titb{Laboratoire/Partenaires de recherche}
+
+        	\titl{Aix-Marseille School of Economics}
+			%% add other labs or partners on their own line
+	\end{minipage}\hfill
+	\begin{minipage}[t]{.03\linewidth}
+	    \dvertline{4pt}{-21em}
+	\end{minipage}\hfill
+	\begin{minipage}[t]{.52\linewidth}
+	    \vspace{.5em}
+    	\titb{\small Composition du jury}
+
+	    \vspace{1em}
+    	\titel{
+        %% TODO — one line per jury member: name, then institution underneath.
+        %% Roles: Rapporteur / Rapporteure, Examinateur / Examinatrice,
+        %% Président(e) du jury, Directeur / Directrice de thèse, Co-directeur.
+        %% Check the spelling of every institution: it is printed as given.
+        \begin{tabular}{p{12em} p{9.5em}}
+        	Prénom NOM & Rapporteur \\
+        	Institution \\
+            \\
+        	Prénom NOM & Rapporteure \\
+        	Institution \\
+        	\\
+            Prénom NOM & Examinateur \\
+        	Institution \\
+            \\
+            Prénom NOM & Examinatrice et \\
+        	Institution & Présidente du jury \\
+            \\
+        	Prénom NOM & Directeur de thèse \\
+        	Aix-Marseille Université \\
+            \\
+        	Prénom NOM & Co-directrice de thèse \\
+        	Aix-Marseille Université \\
+        \end{tabular}
+        }
+	\end{minipage}\hfill
+\end{center}
+
+\vfill
+
+\begin{center} %% logos partenaires
+	\begin{minipage}[c]{.31\linewidth}
+		\centering\includegraphics[width=9em]{logo/amu.png}
+	\end{minipage}\hfill%
+	\begin{minipage}[c]{.31\linewidth}
+		\centering\includegraphics[width=9em]{logo/amse.png}
+	\end{minipage}\hfill%
+	\begin{minipage}[c]{.31\linewidth}
+		\centering\includegraphics[height=4.5em]{logo/cnrs.png}
+	\end{minipage}
+	%% To add a fourth partner logo: drop the file in logo/, add a minipage,
+	%% and set all four to .23\linewidth.
+\end{center}
+
+\restoregeometry
