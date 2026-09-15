@@ -460,7 +460,7 @@ def import_one(folder, index, force, report):
                     #: files get rewritten too, so they need the backup as well
                     shutil.copy2(src, os.path.join(backup, sub))
 
-        uni = caps = multicols = braces = allocs = 0
+        uni = caps = multicols = braces = allocs = appendices = 0
         for path in targets:
             uni += tc.fix_unicode(path)
             b, o, l, n, mc = tc.fix_captions(path)
@@ -471,6 +471,8 @@ def import_one(folder, index, force, report):
             s = orig = open(path, encoding="utf-8", errors="replace").read()
             s, a = tc.guard_allocations(s)
             allocs += a
+            s, ap = tc.neutralise_appendix(s)
+            appendices += ap
             s = tc.prefix_refs(s, prefix)
             s = tc.prefix_inputs(s, folder)
             if os.path.normpath(rel) in appendix_files:
@@ -491,6 +493,10 @@ def import_one(folder, index, force, report):
             report.append(("FIXED", folder,
                            "%d file(s) ended with one unmatched } — commented out"
                            % braces))
+        if appendices:
+            report.append(("FIXED", folder,
+                           "%d bare \\appendix removed — it would have renumbered "
+                           "every chapter after this one into letters" % appendices))
         if allocs:
             report.append(("NOTE", folder,
                            "%d \\newsavebox/\\newlength/\\newcounter guarded, so "

@@ -45,6 +45,7 @@ break, and the script handles all of them:
 | A blank line inside a `\caption{}` | replaces it with `\newline` (the argument is not `\long`, so a blank line aborts the run) |
 | A `\caption` left outside any float | comments it out |
 | A `\label` between `\begin{tabular}` and `\toprule` | moves it above the tabular (otherwise `Misplaced \noalign`) |
+| A bare `\appendix` at the top of the paper's appendix | comments it out — otherwise every *later* chapter is renumbered into letters, silently |
 | The `esttab` notes row left below `\end{tabular}` | rewrites it as a `\parbox` (otherwise `Misplaced \omit`) |
 | A table fragment ending in one unmatched `}` | comments the brace out — it silently closed a group in the file above it |
 | The same `\newsavebox` declared in five tables | guards each one, so it is allocated once and reused |
@@ -122,7 +123,7 @@ figures, and the cover uses the 2025 amU logo and the official AMU blue.
 | `biblio.bib` | references for the general introduction and conclusion only |
 | `chapters/` | your Overleaf exports |
 | `logo/`, `fonts/`, `t1tit.fd` | title-page assets |
-| `tools/` | the import script and its repair passes |
+| `tools/` | the import script, its repair passes, and the caption splitter |
 
 Each chapter keeps its own `.bib` and prints its own reference list. The general
 introduction and conclusion each have one too, drawn from `biblio.bib`.
@@ -141,6 +142,32 @@ python3 tools/import_chapter.py                    # all chapters
 python3 tools/import_chapter.py chapters/02-care   # just one
 python3 tools/import_chapter.py --force            # rewrite tex/chapN.tex too
 ```
+
+## Captions that swallow the note
+
+A working paper often keeps the whole note inside the caption:
+
+```latex
+\caption{\footnotesize \textbf{Effects of temperature on paid work.} This
+figure presents the marginal effects from OLS estimates of equation (1) ...}
+```
+
+On its own that reads fine. In a thesis the List of Figures prints captions in
+full, so twenty figures become twenty paragraphs. A second script moves the
+prose under the figure and leaves the title in the caption:
+
+```bash
+python3 tools/split_caption_notes.py chapters/01-first-paper --dry-run
+python3 tools/split_caption_notes.py chapters/01-first-paper
+python3 tools/split_caption_notes.py chapters/01-first-paper --tables
+```
+
+It is deliberately **not** part of `import_chapter.py`: restructuring a float
+the author wrote on purpose is a decision, not a repair. It only touches a
+caption shaped *bold title, then a paragraph of prose* — a caption that is just
+a title, or has no `\textbf`, is left alone and counted, and panel captions
+inside `subfigure` or `minipage` are never touched. It keeps a `.precaption`
+copy of every file it changes. Read the diff.
 
 ## Before you hand it in
 

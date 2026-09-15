@@ -305,6 +305,25 @@ def _fix_orphan_multicolumn(s):
     return "".join(out), n
 
 
+BARE_APPENDIX = re.compile(r"(?m)^([ \t]*)\\appendix[ \t]*$")
+
+
+def neutralise_appendix(s):
+    r"""A bare \appendix inside a chapter renumbers every chapter after it.
+
+    In a standalone paper the appendix file opens with \appendix and that is
+    correct. In a thesis it is a document-wide switch: from that line on
+    \thechapter counts in letters, so the chapter *after* this one comes out
+    as "Appendix A" in the text, the header and the table of contents. It is
+    also silent — no warning, no error, just a thesis whose third chapter is
+    called A. Each chapter's own appendix is set up by tex/chapN.tex instead.
+    """
+    return BARE_APPENDIX.subn(
+        lambda m: m.group(1) + "%% [\\appendix removed by the import script: "
+                  "it would renumber every chapter after this one; the "
+                  "chapter's appendix is set up in tex/chapN.tex]", s)
+
+
 def check_orphan_multicolumn(path):
     r"""Line numbers of a \multicolumn with no tabular open and none closed
     before it — almost always a lost \begin{tabular} line. Reported only."""

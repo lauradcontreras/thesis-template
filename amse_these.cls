@@ -27,6 +27,12 @@
 	index=totoc								%% index in TOC
 	}
 
+%% A thesis chapter can easily run past 100 tables, and "3.101" does not fit
+%% in the 1.5em KOMA reserves for the number in the lists. Without this, every
+%% run prints a tocbasic warning and the number touches the caption.
+\DeclareTOCStyleEntry[numwidth=3.2em]{tocline}{figure}
+\DeclareTOCStyleEntry[numwidth=3.2em]{tocline}{table}
+
 \RequirePackage{lipsum}						%% lorem ipsum (example)
 
 %%%%% MINIMAL EXTENSIONS
