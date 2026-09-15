@@ -93,6 +93,12 @@ HANDLED = {
     "titlesec": "drop it: chapter/section styling is the thesis's job",
     "fancyhdr": "drop it: KOMA-Script handles the headers",
     "subfig": "use subcaption (loaded by the class) instead",
+    "subfigure": "obsolete and clashes with subcaption, which the class loads",
+    "color": "superseded by xcolor, which the class loads",
+    "parskip": "drop it: paragraph spacing is the thesis's call, not the paper's",
+    "appendix": "not needed: the thesis opens its own Appendices section",
+    "footmisc": "usually only there for the title block, which is not imported",
+    "eurosym": "not needed: preamble-extra.tex defines \\euro",
 }
 
 
@@ -172,6 +178,14 @@ def tidy_text(s):
     # these do take one argument, and we want it gone with them
     for cmd in ("setstretch", "vspace", "hspace", "label"):
         s = re.sub(r"\\" + cmd + r"\*?\s*\{[^{}]*\}", "", s)
+    # \textbf{...} around a title is styling from the paper's title block;
+    # keep the words, drop the wrapper
+    for _ in range(3):
+        m = re.search(r"\\(?:textbf|textrm|textnormal)\s*\{", s)
+        if not m:
+            break
+        inner, end = brace_arg(s, m.start())
+        s = s[:m.start()] + inner + s[end + 1:]
     s = s.replace("\\\\", " ")
     s = re.sub(r"\s+", " ", s)
     return s.strip().strip("{}").strip()
@@ -184,7 +198,7 @@ def parse_main(path):
     preamble, _, body = src.partition("\\begin{document}")
     info = {"title": "", "abstract": "", "keywords": "", "jel": "",
             "inputs": [], "bibs": [], "packages": [], "frontmatter": [],
-            "preamble": preamble}
+            "after_bib": [], "preamble": preamble}
 
     # Many papers keep \title / \maketitle / abstract in a separate file that
     # main.tex \inputs. Inline one level so we can find them there too.
@@ -221,6 +235,13 @@ def parse_main(path):
         p = m.group(1).strip()
         if p not in info["inputs"]:
             info["inputs"].append(p)
+
+    #: everything the main file inputs after printing the bibliography is an
+    #: appendix, whatever the file happens to be called
+    tail = re.split(r"\\printbibliography|\\bibliography\{", body)
+    if len(tail) > 1:
+        for m in re.finditer(r"\\(?:input|include)\{([^{}]*)\}", tail[-1]):
+            info["after_bib"].append(m.group(1).strip())
 
     for m in re.finditer(r"\\bibliography\{([^{}]*)\}", body):
         for b in m.group(1).split(","):
@@ -278,9 +299,17 @@ def provided_packages():
 # writing the chapter wrapper
 # ---------------------------------------------------------------------------
 
-def is_appendix(path):
+def is_appendix(path, after_bib=()):
+    """An appendix either looks like one, or sits after the bibliography.
+
+    Papers often call their appendix files A1, A2, annex... — names no list of
+    hints will catch. But whatever they are called, they come after
+    \\printbibliography in the paper's main file, and that is decisive.
+    """
     low = path.lower()
-    return any(h in low for h in APPENDIX_HINTS)
+    if any(h in low for h in APPENDIX_HINTS):
+        return True
+    return path in after_bib
 
 
 def wrapper_text(prefix, folder, info, body_inputs, appendix_inputs):
@@ -394,9 +423,26 @@ def import_one(folder, index, force, report):
                 report.append(("WARN", folder,
                                "the paper does \\input{%s} but that file is missing "
                                "— left in the wrapper, comment it out if unused" % p))
-        (appendix_inputs if is_appendix(p) else body_inputs).append(p)
+        (appendix_inputs if is_appendix(p, info["after_bib"])
+         else body_inputs).append(p)
 
     # --- repair and namespace the paper's own files -------------------------
+    appendix_files = {os.path.normpath(p if p.endswith(".tex") else p + ".tex")
+                      for p in appendix_inputs}
+    #: Most projects keep their text in sections/ or similar, but some put
+    #: every file at the top level. Those must be processed too — all except
+    #: the standalone documents (main file, slides, comment sheets), which
+    #: are the ones carrying \documentclass.
+    targets = []
+    for sub in sorted(os.listdir(abs_dir)):
+        sub_dir = os.path.join(abs_dir, sub)
+        if os.path.isdir(sub_dir) and sub != "_orig-overleaf":
+            targets.extend(tc.tex_files(sub_dir))
+        elif sub.endswith(".tex") and os.path.isfile(sub_dir):
+            head = open(sub_dir, encoding="utf-8", errors="replace").read(4000)
+            if "\\documentclass" not in head:
+                targets.append(sub_dir)
+
     if not state.get("namespaced"):
         backup = os.path.join(abs_dir, "_orig-overleaf")
         if not os.path.isdir(backup):
@@ -409,44 +455,91 @@ def import_one(folder, index, force, report):
                                     ignore=shutil.ignore_patterns(
                                         "*.png", "*.pdf", "*.jpg", "*.jpeg",
                                         ".DS_Store"))
+                elif sub.endswith(".tex") and os.path.isfile(src):
+                    #: flat projects keep everything at the top level, and those
+                    #: files get rewritten too, so they need the backup as well
+                    shutil.copy2(src, os.path.join(backup, sub))
 
-        appendix_files = {os.path.normpath(p if p.endswith(".tex") else p + ".tex")
-                          for p in appendix_inputs}
-        uni = caps = 0
-        for sub in sorted(os.listdir(abs_dir)):
-            sub_dir = os.path.join(abs_dir, sub)
-            if not os.path.isdir(sub_dir) or sub == "_orig-overleaf":
-                continue
-            for path in tc.tex_files(sub_dir):
-                uni += tc.fix_unicode(path)
-                b, o, l, n = tc.fix_captions(path)
-                caps += b + o + l + n
-                odd = tc.check_math_delimiters(path)
-                if odd:
-                    where = ", ".join(str(n) for n in odd[:6])
-                    if len(odd) > 6:
-                        where += ", ..."
-                    report.append(("WARN", folder,
-                                   "%s: unclosed $ on line(s) %s — fix by hand, "
-                                   "only you know what the formula should say"
-                                   % (os.path.relpath(path, abs_dir), where)))
-                rel = os.path.relpath(path, abs_dir).replace(os.sep, "/")
-                s = orig = open(path, encoding="utf-8", errors="replace").read()
-                s = tc.prefix_refs(s, prefix)
-                s = tc.prefix_inputs(s, folder)
-                if os.path.normpath(rel) in appendix_files:
-                    s = tc.demote_headings(s)
-                if s != orig:
-                    open(path, "w", encoding="utf-8").write(s)
+        uni = caps = multicols = braces = allocs = 0
+        for path in targets:
+            uni += tc.fix_unicode(path)
+            b, o, l, n, mc = tc.fix_captions(path)
+            caps += b + o + l + n
+            multicols += mc
+            braces += 1 if tc.fix_stray_brace(path) else 0
+            rel = os.path.relpath(path, abs_dir).replace(os.sep, "/")
+            s = orig = open(path, encoding="utf-8", errors="replace").read()
+            s, a = tc.guard_allocations(s)
+            allocs += a
+            s = tc.prefix_refs(s, prefix)
+            s = tc.prefix_inputs(s, folder)
+            if os.path.normpath(rel) in appendix_files:
+                s = tc.demote_headings(s)
+            if s != orig:
+                open(path, "w", encoding="utf-8").write(s)
         if uni:
-            report.append(("FIXED", folder, "%d Windows-1252 control characters" % uni))
+            report.append(("FIXED", folder,
+                           "%d Windows-1252 control characters and Unicode "
+                           "maths symbols" % uni))
         if caps:
             report.append(("FIXED", folder, "%d caption/label defects" % caps))
+        if multicols:
+            report.append(("FIXED", folder,
+                           "%d \\multicolumn row(s) sitting outside any tabular "
+                           "— rewritten as \\parbox" % multicols))
+        if braces:
+            report.append(("FIXED", folder,
+                           "%d file(s) ended with one unmatched } — commented out"
+                           % braces))
+        if allocs:
+            report.append(("NOTE", folder,
+                           "%d \\newsavebox/\\newlength/\\newcounter guarded, so "
+                           "a declaration repeated across tables is made once"
+                           % allocs))
         imgs = tc.fix_spaced_graphics(abs_dir)
         if imgs:
             report.append(("FIXED", folder,
                            "%d image file(s) had spaces in the name — renamed and "
                            "references updated" % imgs))
+
+    #: These only look; they never write. They run on every import, not just
+    #: the first, because the workflow is "run it, fix what it flags, run it
+    #: again" and a second run that says nothing would look like all clear.
+    CHECKS = (
+        (tc.check_math_delimiters,
+         "unclosed $ on line(s) %s — fix by hand, only you know what the "
+         "formula should say"),
+        (tc.check_orphan_multicolumn,
+         "\\multicolumn with no tabular around it on line(s) %s — the "
+         "\\begin{tabular} line looks lost; LaTeX stops here"),
+        (tc.check_double_subscripts,
+         "two subscripts in a row on line(s) %s — `X_i_t` typesets as `X_i` "
+         "and drops the rest; write `X_{it}` if that is what you meant"),
+    )
+    for path in targets:
+        rel = os.path.relpath(path, abs_dir).replace(os.sep, "/")
+        for check, message in CHECKS:
+            lines = check(path)
+            if not lines:
+                continue
+            where = ", ".join(str(n) for n in lines[:6])
+            if len(lines) > 6:
+                where += ", ..."
+            report.append(("WARN", folder, "%s: %s" % (rel, message % where)))
+
+    case_fixed, missing = tc.fix_path_case(abs_dir, folder)
+    if case_fixed:
+        report.append(("FIXED", folder,
+                       "%d path(s) did not match the file name's case — "
+                       "harmless on macOS, fatal on Overleaf and Linux"
+                       % case_fixed))
+    for ref in missing[:8]:
+        report.append(("WARN", folder,
+                       "%s is used but no such file exists in the chapter" % ref))
+    if len(missing) > 8:
+        report.append(("WARN", folder,
+                       "... and %d more missing files" % (len(missing) - 8)))
+
         state["namespaced"] = True
 
     # --- bibliography --------------------------------------------------------
@@ -459,10 +552,16 @@ def import_one(folder, index, force, report):
                 if bad:
                     report.append(("FIXED", folder,
                                    "%s: %d Windows-1252 control characters" % (b, bad)))
-                dropped, _ = tc.clean_bib(cand)
+                dropped, _, empty = tc.clean_bib(cand)
                 if dropped:
                     report.append(("FIXED", folder,
                                    "%s: %d noisy fields dropped" % (b, dropped)))
+                if empty:
+                    report.append(("FIXED", folder,
+                                   "%s: %d entry/entries had a citation key and "
+                                   "nothing else — dropped, because biber stops "
+                                   "on one and then no bibliography is built at "
+                                   "all" % (b, empty)))
             bibs.append("%s/%s" % (folder, b))
         else:
             report.append(("WARN", folder,

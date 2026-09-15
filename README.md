@@ -45,6 +45,11 @@ break, and the script handles all of them:
 | A blank line inside a `\caption{}` | replaces it with `\newline` (the argument is not `\long`, so a blank line aborts the run) |
 | A `\caption` left outside any float | comments it out |
 | A `\label` between `\begin{tabular}` and `\toprule` | moves it above the tabular (otherwise `Misplaced \noalign`) |
+| The `esttab` notes row left below `\end{tabular}` | rewrites it as a `\parbox` (otherwise `Misplaced \omit`) |
+| A table fragment ending in one unmatched `}` | comments the brace out — it silently closed a group in the file above it |
+| The same `\newsavebox` declared in five tables | guards each one, so it is allocated once and reused |
+| A minus sign pasted as U+2212, or `≤`, `≈`, `→` | replaces them with the maths they mean |
+| An empty `@misc{key}` left by Zotero | drops it — biber stops there and then builds no bibliography at all |
 | Spaces in file names | renames the files and updates the references |
 
 It also takes the **chapter title, the abstract, the keywords and the JEL codes**
@@ -58,6 +63,10 @@ The script never guesses. It prints a report and these are the lines to act on:
   Add it to `tex/preamble-extra.tex` if the chapter needs it.
 - **`[WARN] unclosed $`** — a math mode opened and never closed, usually a
   mangled table header from `esttab`. Only you know what the formula meant.
+- **`[WARN] two subscripts in a row`** — `$X_i_t$` typesets as `X_i` and drops
+  the rest. It is `X_{it}` you want, unless you really meant `X_{i_t}`.
+- **`[WARN] \multicolumn with no tabular`** — the `\begin{tabular}` line of that
+  table is gone. Nothing can guess the column spec back.
 - **`[WARN] missing file`** — the paper `\input`s something that is not there.
 - **`[TODO] no JEL codes`** — the paper never stated them; add them by hand.
 - **`[CHECK] no appendix detected`** — your appendix file is not named like one.
@@ -122,8 +131,10 @@ introduction and conclusion each have one too, drawn from `biblio.bib`.
 
 Safe at any time. `tex/chapN.tex` belongs to you once it exists and the script
 will not touch it again unless you pass `--force`. Every pass is idempotent, so
-nothing gets prefixed twice. The paper's untouched files are kept in
-`chapters/<your-chapter>/_orig-overleaf/`.
+nothing gets prefixed twice. The repairs run once, on the first import; the
+checks run every time, so you can fix what a `[WARN]` points at and run the
+script again to see whether anything is left. The paper's untouched files are
+kept in `chapters/<your-chapter>/_orig-overleaf/`.
 
 ```bash
 python3 tools/import_chapter.py                    # all chapters

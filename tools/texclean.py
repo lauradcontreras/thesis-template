@@ -57,14 +57,20 @@ def _escape_specials(s):
     return "$".join(parts)
 
 
+#: `@misc{key}` with no fields at all — Zotero writes one whenever an item was
+#: added by drag-and-drop and never filled in. biber stops on it with
+#: "syntax error: found }, expected ," and no bibliography is produced at all.
+BARE_KEY = re.compile(r"\s*[^\s=,{}\"]+\s*\Z")
+
+
 def clean_bib(path):
-    """Drop noisy fields and escape % & # . Returns (dropped, backup_path)."""
+    """Drop noisy fields and escape % & # . Returns (dropped, backup_path, empty)."""
     src = open(path, encoding="utf-8", errors="replace").read()
     backup = path + ".orig"
     if not os.path.exists(backup):
         open(backup, "w", encoding="utf-8").write(src)
 
-    out, i, dropped = [], 0, 0
+    out, i, dropped, empty = [], 0, 0, 0
     while True:
         at = src.find("@", i)
         if at == -1:
@@ -97,11 +103,18 @@ def clean_bib(path):
                 dropped += 1
                 continue
             kept.append(_escape_specials(part))
+        if len(kept) == 1 and BARE_KEY.match(kept[0]):
+            #: nothing but a citation key: not a reference, and fatal to biber
+            empty += 1
+            out.append("%% [empty entry dropped by the import script: @"
+                       + head[1:].rstrip("{") + "{" + kept[0].strip() + "}]\n")
+            i = j + 1
+            continue
         out.append(head + ",".join(kept) + "\n}")
         i = j + 1
 
     open(path, "w", encoding="utf-8").write("".join(out))
-    return dropped, backup
+    return dropped, backup, empty
 
 
 # ---------------------------------------------------------------------------
@@ -112,15 +125,46 @@ C1_REMAP = {0x91: "\u2018", 0x92: "\u2019", 0x93: "\u201c", 0x94: "\u201d",
             0x96: "--", 0x97: "---", 0x85: "\\dots ", 0x95: "\u2022",
             0xA0: " "}
 
+#: Maths symbols that word processors, Stata logs and web pages emit as
+#: Unicode and that T1 has no text-mode glyph for, so each one stops the run
+#: with "Unicode character not set up for use with LaTeX". The replacement
+#: depends on where the character sits: U+2212 is a minus sign, which is `-`
+#: inside $...$ and `$-$` outside it.
+#:
+#: Only characters that actually fail belong here. ×, ÷, ±, ° and ′ all
+#: typeset as they are and are left alone — a pass that rewrites working input
+#: is a pass whose output the author has to proofread.
+MATH_REMAP = {0x2212: "-", 0x2264: "\\leq", 0x2265: "\\geq",
+              0x2248: "\\approx", 0x2260: "\\neq", 0x221E: "\\infty",
+              0x2211: "\\sum", 0x220F: "\\prod", 0x221A: "\\sqrt{}",
+              0x2192: "\\rightarrow", 0x21D2: "\\Rightarrow",
+              0x2208: "\\in", 0x2211: "\\sum", 0x2202: "\\partial"}
+
 
 def fix_unicode(path):
-    """Replace stray Windows-1252 control bytes. Returns how many."""
+    """Replace stray Windows-1252 control bytes and Unicode maths. Returns how many."""
     s = open(path, encoding="utf-8", errors="replace").read()
-    out, hits = [], 0
+    out, hits, math, esc = [], 0, False, False
     for ch in s:
         o = ord(ch)
+        if esc:                                  # the char after a backslash
+            esc = False
+            out.append(ch)
+            continue
+        if ch == "\\":
+            esc = True
+            out.append(ch)
+            continue
+        if ch == "$":
+            math = not math
+            out.append(ch)
+            continue
         if o in C1_REMAP:
             out.append(C1_REMAP[o])
+            hits += 1
+        elif o in MATH_REMAP:
+            sym = MATH_REMAP[o]
+            out.append(sym if math else "$" + sym + "$")
             hits += 1
         elif 0x80 <= o <= 0x9F:
             hits += 1                            # drop it
@@ -192,17 +236,164 @@ def _comment_orphan_captions(s):
     return "\n".join(lines), n
 
 
+TABULARS = ("tabular", "tabularx", "tabular*", "longtable", "tabu", "array")
+
+MULTICOL_RE = re.compile(r"\\multicolumn\s*\{")
+PBOX_SPEC = re.compile(r"^\s*[pmb]\{(?P<w>[^{}]*)\}\s*$")
+
+
+def _orphan_multicolumns(s):
+    r"""Yield (start, end_of_last_group, colspec, body, closed_before) for every
+    \multicolumn that is not inside a tabular at that point in the file."""
+    for m in MULTICOL_RE.finditer(s):
+        before = s[:m.start()]
+        opened = sum(before.count("\\begin{" + e + "}") for e in TABULARS)
+        closed = sum(before.count("\\end{" + e + "}") for e in TABULARS)
+        if opened > closed:
+            continue
+        try:
+            ob = s.index("{", m.end() - 1)       # {ncols}
+            cb = _match_brace(s, ob)
+            if cb == -1 or s[cb + 1:].lstrip()[:1] != "{":
+                continue
+            ob2 = s.index("{", cb + 1)           # {colspec}
+            cb2 = _match_brace(s, ob2)
+            if cb2 == -1 or s[cb2 + 1:].lstrip()[:1] != "{":
+                continue
+            ob3 = s.index("{", cb2 + 1)          # {body}
+            cb3 = _match_brace(s, ob3)
+        except ValueError:
+            continue
+        if cb3 == -1:
+            continue
+        yield m.start(), cb3 + 1, s[ob2 + 1:cb2], s[ob3 + 1:cb3], closed > 0
+
+
+def _fix_orphan_multicolumn(s):
+    r"""The table-notes row left below \end{tabular}: "Misplaced \omit".
+
+    Stata's esttab writes the notes as one more \multicolumn row, spanning the
+    table in a p{...} column. Authors move it out from under \end{tabular} so
+    that \resizebox does not scale the notes with the numbers, and it then sits
+    in ordinary text, where \multicolumn expands to \multispan -> \omit and
+    stops the run. \parbox is the box the author meant.
+
+    Deliberately narrow: only a paragraph column (p/m/b), and only after a
+    tabular has been closed earlier in the file. A \multicolumn{1}{c}{(1)} with
+    no tabular anywhere means the \begin{tabular} line itself was lost, and
+    that is not something to guess at — check_orphan_multicolumn reports it.
+    """
+    out, i, n = [], 0, 0
+    for start, end, spec, body, closed_before in _orphan_multicolumns(s):
+        if start < i or not closed_before:
+            continue
+        w = PBOX_SPEC.match(spec)
+        if not w:
+            continue
+        out.append(s[i:start])
+        out.append("%% [table-notes \\multicolumn left outside the tabular, "
+                   "rewritten as \\parbox by the import script]\n")
+        out.append("\\parbox{%s}{%s}" % (w.group("w"), body))
+        i = end
+        #: its row terminator would now be a \\ in vertical mode
+        while s[i:i + 1] in (" ", "\t"):
+            i += 1
+        if s[i:i + 2] == "\\\\":
+            i += 2
+        n += 1
+    out.append(s[i:])
+    return "".join(out), n
+
+
+def check_orphan_multicolumn(path):
+    r"""Line numbers of a \multicolumn with no tabular open and none closed
+    before it — almost always a lost \begin{tabular} line. Reported only."""
+    s = open(path, encoding="utf-8", errors="replace").read()
+    return sorted({s.count("\n", 0, start) + 1
+                   for start, _, _, _, closed in _orphan_multicolumns(s)
+                   if not closed})
+
+
 def fix_captions(path):
-    """Three caption/label defects. Returns (blank_lines, orphans, labels, newlines)."""
+    """Caption/label/table defects. Returns (blank_lines, orphans, labels, newlines, multicols)."""
     s = orig = open(path, encoding="utf-8", errors="replace").read()
     s, blanks = _fix_blank_lines_in_captions(s)
     s, orphans = _comment_orphan_captions(s)
     s, labels = LABEL_IN_TABULAR.subn(lambda m: m.group("lab") + m.group("beg"), s)
     s, newlines = VERTICAL_NEWLINE.subn(
         "\n\n%% [\\\\newline in vertical mode removed by the import script]\n", s)
+    s, multicols = _fix_orphan_multicolumn(s)
     if s != orig:
         open(path, "w", encoding="utf-8").write(s)
-    return blanks, orphans, labels, newlines
+    return blanks, orphans, labels, newlines, multicols
+
+
+ALLOC_RE = re.compile(r"(?<![{\\])\\(newsavebox|newlength|newcounter)\s*\{\\?([A-Za-z@]+)\}")
+
+
+def guard_allocations(s):
+    r"""\newsavebox et al. declared twice: "Command \tempbox already defined".
+
+    A paper that builds several tables the same way copies the whole block,
+    \newsavebox included. On its own that is one \newsavebox per file and TeX
+    never notices; in a thesis every file is read into one document and the
+    second declaration is an error. Guarding each one keeps the first and makes
+    the rest reuse it, whatever order the files end up being read in.
+    """
+    def sub(m):
+        cmd, name = m.group(1), m.group(2)
+        return ("\\makeatletter\\@ifundefined{%s}{\\%s{\\%s}}{}\\makeatother"
+                % (name, cmd, name))
+    return ALLOC_RE.subn(sub, s)
+
+
+STRAY_BRACE_TAIL = re.compile(r"\n[ \t]*\}[ \t]*\n?\s*$")
+
+
+def fix_stray_brace(path):
+    r"""One unmatched } alone on the last line of an \input-ed fragment.
+
+    esttab writes `\resizebox{\textwidth}{!}{` above the tabular and its brace
+    below it. When the author moves the \resizebox into the parent file and
+    forgets the closing brace here, the fragment carries one } too many. LaTeX
+    recovers with "Extra }, or forgotten \endgroup" and the table survives, so
+    the defect travels from Overleaf unnoticed — but it silently closes
+    whatever group the parent had open around the \input.
+
+    Only the unambiguous case is repaired: exactly one surplus }, and it is the
+    file's last line. Returns True if it commented one out.
+    """
+    s = open(path, encoding="utf-8", errors="replace").read()
+    body = re.sub(r"(?<!\\)%.*", "", re.sub(r"\\.", "", s))
+    if body.count("}") - body.count("{") != 1:
+        return False
+    if not STRAY_BRACE_TAIL.search(s):
+        return False
+    s = STRAY_BRACE_TAIL.sub(
+        lambda m: "\n%% [unmatched } removed by the import script — the group "
+                  "it closed is opened in the file that \\input's this one]\n", s)
+    open(path, "w", encoding="utf-8").write(s)
+    return True
+
+
+#: `x^2_i` is correct TeX; only the *same* index twice in a row is the mistake
+DOUBLE_SUB = re.compile(r"([_^])\s*[A-Za-z0-9]\s*\1")
+
+
+def check_double_subscripts(path):
+    r"""Line numbers carrying `$Z_i_h_c_t$` — TeX reads only the first index.
+
+    Reported, never repaired: `X_i_t` almost always means `X_{it}`, but it can
+    also mean `X_{i_t}`, and the two are different variables.
+    """
+    bad = []
+    for i, line in enumerate(open(path, encoding="utf-8", errors="replace"), 1):
+        stripped = re.sub(r"(?<!\\)%.*", "", line)
+        for seg in re.split(r"(?<!\\)\$", stripped)[1::2]:
+            if DOUBLE_SUB.search(seg):
+                bad.append(i)
+                break
+    return bad
 
 
 # ---------------------------------------------------------------------------
@@ -284,8 +475,9 @@ def main():
         sys.exit(1)
     what, target = sys.argv[1], sys.argv[2]
     if what == "bib":
-        dropped, backup = clean_bib(target)
-        print("%s: %d fields dropped (backup: %s)" % (target, dropped, backup))
+        dropped, backup, empty = clean_bib(target)
+        print("%s: %d fields and %d empty entries dropped (backup: %s)"
+              % (target, dropped, empty, backup))
     elif what == "unicode":
         total = sum(fix_unicode(p) for p in tex_files(target))
         print("%s: %d control characters fixed" % (target, total))
@@ -517,3 +709,113 @@ def check_math_delimiters(path):
             display -= line.count(tok)
         display = max(display, 0)
     return bad
+
+
+# ---------------------------------------------------------------------------
+# 8. Paths whose case does not match the file on disk
+# ---------------------------------------------------------------------------
+
+INPUT_RE = re.compile(r"(\\(?:input|include)\{)([^{}]*)(\})")
+
+
+def fix_path_case(chapter_dir, folder):
+    """Make every \\input and \\includegraphics path match the real file name.
+
+    macOS filesystems ignore case, so `\\input{Tables/x}` happily finds
+    `tables/x` on the author's laptop and then fails on Overleaf, on Linux and
+    in CI, which do not. This rewrites the reference to the name on disk.
+
+    Returns (fixed, missing): how many paths were corrected, and the ones that
+    match no file at all whatever the case.
+    """
+    #: Build the index from the directory listing, which keeps the real
+    #: spelling. os.path.exists() is useless here: on macOS it answers yes to
+    #: `Tables/x` when the folder is `tables/`, which is exactly the mistake
+    #: this pass exists to catch.
+    index, exact = {}, set()
+    for dp, _, names in os.walk(chapter_dir):
+        if "_orig-overleaf" in dp:
+            continue
+        for n in names:
+            rel = os.path.relpath(os.path.join(dp, n), chapter_dir).replace(os.sep, "/")
+            index.setdefault(rel.lower(), rel)
+            exact.add(rel)
+
+    fixed, missing = 0, []
+
+    def resolve(rest, exts):
+        """Real spelling of `rest` in this chapter, or None if already right."""
+        for ext in exts:
+            if rest + ext in exact:
+                return None                       # already correct
+        for ext in exts:
+            hit = index.get((rest + ext).lower())
+            if hit:
+                return hit[:-len(ext)] if ext and hit.lower().endswith(ext) else hit
+        return ""                                 # nowhere to be found
+
+    def split_comment(line):
+        """(code, comment) — a % that is not \% starts the comment."""
+        esc = False
+        for i, ch in enumerate(line):
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == "%":
+                return line[:i], line[i:]
+        return line, ""
+
+    for path in tex_files(chapter_dir):
+        orig = open(path, encoding="utf-8", errors="replace").read()
+
+        def do_input(m):
+            nonlocal fixed
+            head, ref, tail = m.groups()
+            prefix = folder + "/"
+            if not ref.startswith(prefix):
+                return m.group(0)
+            rest = ref[len(prefix):]
+            got = resolve(rest, (".tex", "") if not rest.endswith(".tex") else ("",))
+            if got is None:
+                return m.group(0)
+            if got == "":
+                missing.append(ref)
+                return m.group(0)
+            fixed += 1
+            return head + prefix + got + tail
+
+        def do_graphics(m):
+            nonlocal fixed
+            head, ref = m.group(1), m.group(2).strip()
+            got = resolve(ref, IMG_EXT)
+            if got is None:
+                return m.group(0)
+            if got == "":
+                missing.append(ref)
+                return m.group(0)
+            fixed += 1
+            return head + got + "}"
+
+        #: only touch real code — a path inside a comment, or inside a
+        #: \begin{comment} block, is not part of the document
+        out, commented = [], False
+        for line in orig.split("\n"):
+            if "\\begin{comment}" in line:
+                commented = True
+            if "\\end{comment}" in line:
+                commented = False
+                out.append(line)
+                continue
+            if commented:
+                out.append(line)
+                continue
+            code, comment = split_comment(line)
+            code = INPUT_RE.sub(do_input, code)
+            code = GRAPHICS.sub(do_graphics, code)
+            out.append(code + comment)
+        s = "\n".join(out)
+        if s != orig:
+            open(path, "w", encoding="utf-8").write(s)
+
+    return fixed, sorted(set(missing))
