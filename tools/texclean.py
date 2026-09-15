@@ -452,12 +452,62 @@ def prefix_inputs(s, root):
     return re.sub(r"\\(input|include)\{([^{}]*)\}", rep, s)
 
 
-def demote_headings(s):
-    """\\section -> \\subsection -> \\subsubsection -> \\paragraph."""
-    s = s.replace("\\subsubsection", "\x00")
-    s = s.replace("\\subsection", "\\subsubsection")
-    s = s.replace("\\section", "\\subsection")
-    return s.replace("\x00", "\\paragraph")
+LEVELS = ["section", "subsection", "subsubsection", "paragraph", "subparagraph"]
+HEADING_RE = re.compile(r"(?<!\\)\\(sub)*(?:section|paragraph)(?=\*?\s*[\[{])")
+
+#: the appendix's top heading has to land here for tex/chapN.tex's
+#: \thesubsection to number it 1.A, 1.B, 2.A, ...
+APPENDIX_TOP = 1                                     # LEVELS[1] == subsection
+
+
+def heading_levels(s):
+    """The set of heading depths used in s, 0 = \\section."""
+    found = set()
+    for m in HEADING_RE.finditer(s):
+        name = m.group(0)[1:]
+        if name.endswith("paragraph"):
+            found.add(3 + name.count("sub"))         # paragraph, subparagraph
+        else:
+            found.add(name.count("sub"))             # section .. subsubsection
+    return found
+
+
+def shift_headings(s, shift):
+    r"""Move every heading `shift` levels down (positive) or up (negative).
+
+    Not a fixed demotion: a paper's appendix may open with \section, or with
+    \subsection, or — after someone has already tidied it once — with
+    \subsubsection. What matters in the thesis is where the *top* one lands,
+    so the shift is computed per chapter from the shallowest level present.
+    """
+    if not shift:
+        return s, 0
+
+    def sub(m):
+        name = m.group(0)[1:]
+        if name.endswith("paragraph"):
+            lvl = 3 + name.count("sub")
+        else:
+            lvl = name.count("sub")
+        lvl = min(max(lvl + shift, 0), len(LEVELS) - 1)
+        return "\\" + LEVELS[lvl]
+
+    return HEADING_RE.subn(sub, s)
+
+
+#: \subsubsection*{A.2 Additional Tables} — the author numbered the appendix by
+#: hand *and* starred the heading so LaTeX would not number it again. Once the
+#: thesis numbers it, both have to go, but which of the two the author meant to
+#: keep is not something to decide for them.
+MANUAL_APPENDIX_LABEL = re.compile(
+    r"(?<!\\)\\(?:sub)*(?:section|paragraph)\*\s*\{\s*[A-Z]{1,2}(?:\.\d+)*\.?\s+")
+
+
+def check_manual_appendix_labels(path):
+    """Line numbers of starred appendix headings that carry their own A.1 label."""
+    s = open(path, encoding="utf-8", errors="replace").read()
+    return sorted({s.count("\n", 0, m.start()) + 1
+                   for m in MANUAL_APPENDIX_LABEL.finditer(s)})
 
 
 # ---------------------------------------------------------------------------

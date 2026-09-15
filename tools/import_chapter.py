@@ -348,12 +348,22 @@ def wrapper_text(prefix, folder, info, body_inputs, appendix_inputs):
     A("")
     A("    \\clearpage")
     A("    \\addsec{Appendices}")
+    A("    %% The appendix numbers as 1.A, 1.B, ... 2.A, 2.B: its top-level")
+    A("    %% headings are \\subsection, and \\thesubsection is the chapter")
+    A("    %% number plus a letter. The counter has to be reset by hand —")
+    A("    %% \\addsec is starred, so it does not reset it the way a numbered")
+    A("    %% \\section would, and the appendix would carry on from wherever")
+    A("    %% the last section of the chapter body left it (…1.E, 1.F).")
+    A("    %% Do not put a \\section inside the appendix: it would reset the")
+    A("    %% subsection counter and start the letters again from A.")
+    A("    \\setcounter{subsection}{0}")
     A("    \\renewcommand{\\thesubsection}{\\thechapter.\\Alph{subsection}}")
     A("    %%% DO NOT CHANGE %%%")
     A("")
     if appendix_inputs:
         A("    %%% APPENDICES")
-        A("    %% Headings demoted one level by the import script.")
+        A("    %% Headings shifted by the import script so the top level here")
+        A("    %% is \\subsection; below it, \\subsubsection and \\paragraph.")
         for p in appendix_inputs:
             A("    \\input{%s/%s}" % (folder, p))
     else:
@@ -427,8 +437,27 @@ def import_one(folder, index, force, report):
          else body_inputs).append(p)
 
     # --- repair and namespace the paper's own files -------------------------
-    appendix_files = {os.path.normpath(p if p.endswith(".tex") else p + ".tex")
-                      for p in appendix_inputs}
+    #: An appendix file often does nothing but \input five more. The headings
+    #: are in those five, so the set has to be followed to the end or half the
+    #: appendix keeps the level it had in the paper.
+    appendix_files, queue = set(), [p for p in appendix_inputs]
+    while queue:
+        p = queue.pop()
+        rel = os.path.normpath(p if p.endswith(".tex") else p + ".tex")
+        if rel in appendix_files:
+            continue
+        appendix_files.add(rel)
+        target = os.path.join(abs_dir, rel)
+        if not os.path.isfile(target):
+            continue
+        body = open(target, encoding="utf-8", errors="replace").read()
+        for m in tc.INPUT_RE.finditer(body):
+            child = m.group(2).strip()
+            #: paths are still the paper's own at this point, but prefix_inputs
+            #: may already have rewritten them to start with the chapter folder
+            if child.startswith(folder + "/"):
+                child = child[len(folder) + 1:]
+            queue.append(child)
     #: Most projects keep their text in sections/ or similar, but some put
     #: every file at the top level. Those must be processed too — all except
     #: the standalone documents (main file, slides, comment sheets), which
@@ -475,10 +504,37 @@ def import_one(folder, index, force, report):
             appendices += ap
             s = tc.prefix_refs(s, prefix)
             s = tc.prefix_inputs(s, folder)
-            if os.path.normpath(rel) in appendix_files:
-                s = tc.demote_headings(s)
             if s != orig:
                 open(path, "w", encoding="utf-8").write(s)
+
+        #: The appendix's top heading has to come out as \subsection, because
+        #: that is the level tex/chapN.tex numbers 1.A, 1.B, 2.A. Papers open
+        #: their appendix at whatever level suited the paper, so the shift is
+        #: worked out from the shallowest heading across the whole appendix and
+        #: applied to all of it at once — never file by file, or two files that
+        #: started at different levels would end up at the same one.
+        appendix_paths = [os.path.join(abs_dir, r) for r in sorted(appendix_files)
+                          if os.path.isfile(os.path.join(abs_dir, r))]
+        used = set()
+        for path in appendix_paths:
+            used |= tc.heading_levels(open(path, encoding="utf-8",
+                                           errors="replace").read())
+        if used:
+            shift = tc.APPENDIX_TOP - min(used)
+            moved = 0
+            for path in appendix_paths:
+                s = open(path, encoding="utf-8", errors="replace").read()
+                s, n = tc.shift_headings(s, shift)
+                moved += n
+                if n:
+                    open(path, "w", encoding="utf-8").write(s)
+            if moved:
+                report.append(("FIXED", folder,
+                               "%d appendix heading(s) moved %s %d level(s), so the "
+                               "appendix starts at \\subsection and numbers as "
+                               "%s.A, %s.B, ..."
+                               % (moved, "down" if shift > 0 else "up", abs(shift),
+                                  prefix[4:-1], prefix[4:-1])))
         if uni:
             report.append(("FIXED", folder,
                            "%d Windows-1252 control characters and Unicode "
@@ -532,6 +588,21 @@ def import_one(folder, index, force, report):
             if len(lines) > 6:
                 where += ", ..."
             report.append(("WARN", folder, "%s: %s" % (rel, message % where)))
+
+    for rel in sorted(appendix_files):
+        path = os.path.join(abs_dir, rel)
+        if not os.path.isfile(path):
+            continue
+        manual = tc.check_manual_appendix_labels(path)
+        if manual:
+            where = ", ".join(str(n) for n in manual[:6])
+            if len(manual) > 6:
+                where += ", ..."
+            report.append(("WARN", folder,
+                           "%s: starred appendix heading(s) carrying their own "
+                           "number on line(s) %s — the thesis numbers them now, "
+                           "so drop the star and the A.1 in the title, or they "
+                           "will read \"1.A A.1 Additional Figures\"" % (rel, where)))
 
     case_fixed, missing = tc.fix_path_case(abs_dir, folder)
     if case_fixed:

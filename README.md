@@ -38,7 +38,8 @@ break, and the script handles all of them:
 | Two chapters both have a `\label{tab:main}` | prefixes every label and reference with `chap1-`, `chap2-`, … |
 | `\input{tables/x}` no longer resolves from the thesis root | rewrites every `\input` path |
 | `\includegraphics{figures/y}` likewise | sets `\graphicspath` per chapter, so your figure calls stay untouched |
-| The paper's appendix uses `\section` | demotes its headings one level, under the thesis's *Appendices* |
+| The paper's appendix uses `\section` | shifts its headings so the top one lands on `\subsection`, which the thesis numbers `1.A`, `1.B`, … `2.A` |
+| The appendix's own `\input`ed sub-files | followed too — otherwise half the appendix keeps the level it had in the paper |
 | The paper's macros live in its `main.tex` | copies `\newcommand`, `\definecolor`, `\newtheorem` into the thesis preamble as `\providecommand`, so two chapters cannot clash |
 | An `abstract` field in a `.bib` containing a raw `%` | strips `abstract`, `keywords`, `doi`, `url`, `isbn` and escapes `%`, `&`, `#`, `_` (backup kept as `.bib.orig`) |
 | Word smart quotes pasted into a `.tex` or `.bib` | replaces the Windows-1252 control bytes that make LaTeX stop |
@@ -70,6 +71,9 @@ The script never guesses. It prints a report and these are the lines to act on:
   table is gone. Nothing can guess the column spec back.
 - **`[WARN] missing file`** — the paper `\input`s something that is not there.
 - **`[TODO] no JEL codes`** — the paper never stated them; add them by hand.
+- **`[WARN] starred appendix heading carrying its own number`** — you wrote
+  `\subsection*{A.1 Additional Figures}` because nothing was numbering it. The
+  thesis numbers it now, so drop the star and the `A.1`.
 - **`[CHECK] no appendix detected`** — your appendix file is not named like one.
 - **`[NOTE]`** — things it decided for you, worth a glance.
 
@@ -127,6 +131,27 @@ figures, and the cover uses the 2025 amU logo and the official AMU blue.
 
 Each chapter keeps its own `.bib` and prints its own reference list. The general
 introduction and conclusion each have one too, drawn from `biblio.bib`.
+
+## How the appendices are numbered
+
+Appendices come out as **1.A, 1.B, … 2.A, 2.B**, one letter per top-level
+appendix heading, restarting at A in every chapter. Three things make that work,
+all of them already in the generated `tex/chapN.tex`:
+
+```latex
+\clearpage
+\addsec{Appendices}
+\setcounter{subsection}{0}
+\renewcommand{\thesubsection}{\thechapter.\Alph{subsection}}
+```
+
+The appendix's headings are `\subsection`, then `\subsubsection`, then
+`\paragraph` — the import script shifts whatever the paper used until the top
+one lands on `\subsection`. **Do not put a `\section` inside the appendix**: a
+numbered `\section` resets the subsection counter, and the letters start again
+from A halfway through. `\setcounter{subsection}{0}` is there because `\addsec`
+is starred and does not reset it, so without it the first appendix would carry
+on from the last section of the chapter body — 1.E, 1.F rather than 1.A, 1.B.
 
 ## Rerunning the import
 
