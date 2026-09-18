@@ -4,8 +4,6 @@ A thesis template for AMSE PhD students whose thesis is three or four working
 papers. You keep writing each paper in its own Overleaf project; this template
 assembles them into one manuscript without you rewriting anything by hand.
 
-Built on Fabien Petit's AMSE template, which is itself derived from the official
-Aix-Marseille University class.
 
 ## The five-minute version
 
